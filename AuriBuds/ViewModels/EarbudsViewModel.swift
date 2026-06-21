@@ -3,6 +3,7 @@ import AppKit
 #endif
 import Combine
 import Foundation
+import OSLog
 
 @MainActor
 final class EarbudsViewModel: ObservableObject {
@@ -90,8 +91,9 @@ final class EarbudsViewModel: ObservableObject {
     }
 
     private func persistWidgetData() {
+        let logger = Logger(subsystem: "top.aurysian.auribuds", category: "WidgetSync")
         let battery = state.battery
-        WidgetHeadphoneData(
+        let data = WidgetHeadphoneData(
             deviceName: state.currentDevice?.name ?? state.deviceName,
             connectionStatus: state.connectionStatus.localizedTitle,
             batteryLeft: battery.text(for: .left),
@@ -101,7 +103,44 @@ final class EarbudsViewModel: ObservableObject {
             isCaseCharging: battery.isCharging(.batteryCase),
             imageName: DeviceImageProvider.shared.primaryImageName(for: state),
             fallbackSystemName: state.currentDevice?.fallbackSystemName ?? "headphones"
+        )
+        logger.debug("persistWidgetData: name=\(data.deviceName) status=\(data.connectionStatus) L=\(data.batteryLeft) R=\(data.batteryRight) C=\(data.batteryCase)")
+        data.save()
+    }
+
+    func writeWidgetDebugData() {
+        let logger = Logger(subsystem: "top.aurysian.auribuds", category: "WidgetSync")
+        logger.debug("═══════════════════════════════════════")
+        logger.debug("[DEBUG-WRITE] START")
+        let containerURL = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: "group.top.aurysian.auribuds")
+        logger.debug("[DEBUG-WRITE] containerPath=\(containerURL?.path ?? "nil", privacy: .public)")
+        let suiteCheck = UserDefaults(suiteName: "group.top.aurysian.auribuds")
+        logger.debug("[DEBUG-WRITE] UserDefaults(suiteName:) = \(suiteCheck != nil ? "OK" : "NIL", privacy: .public)")
+
+        if let store = suiteCheck {
+            let heartbeat = store.double(forKey: "widgetHeartbeat")
+            if heartbeat > 0 {
+                let date = Date(timeIntervalSince1970: heartbeat)
+                logger.debug("[DEBUG-WRITE] widgetHeartbeat=\(date, privacy: .public) — Widget Extension DID execute")
+            } else {
+                logger.warning("[DEBUG-WRITE] widgetHeartbeat=0 — Widget Extension NEVER executed load()")
+            }
+        }
+
+        logger.debug("[DEBUG-WRITE] writing: name=DEBUG status=CONNECTED L=88% R=77% C=66%")
+        WidgetHeadphoneData(
+            deviceName: "DEBUG",
+            connectionStatus: "CONNECTED",
+            batteryLeft: "88%",
+            batteryRight: "77%",
+            batteryCase: "66%",
+            ancMode: "关闭",
+            isCaseCharging: false,
+            imageName: nil,
+            fallbackSystemName: "headphones"
         ).save()
+        logger.debug("[DEBUG-WRITE] DONE")
+        logger.debug("═══════════════════════════════════════")
     }
 
     deinit {

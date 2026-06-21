@@ -5,7 +5,8 @@ import SwiftUI
 @main
 struct AuriBudsApp: App {
     @StateObject private var viewModel = EarbudsViewModel()
-
+    @State private var appeared = false
+    
     init() {
         BluetoothMonitor.shared.start()
     }
@@ -51,11 +52,17 @@ struct AuriBudsApp: App {
                     viewModel.start()
                 }
         } label: {
-            Image("oppobuds.bud.large")
+            Image("projectlogo.large")
                 .renderingMode(.template)
-                .font(.system(size: 24, weight: .medium))
-                .symbolRenderingMode(.monochrome)
-                .accessibilityLabel("AuriBuds")
+                .scaleEffect(appeared ? 1 : 0.5)
+                .opacity(appeared ? 1 : 0)
+                .animation(
+                    .spring(response: 0.4),
+                    value: appeared
+                )
+                .onAppear {
+                    appeared = true
+                }
         }
         .menuBarExtraStyle(.window)
     }

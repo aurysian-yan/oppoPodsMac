@@ -1,4 +1,5 @@
 import AppIntents
+import OSLog
 import SwiftUI
 import WidgetKit
 
@@ -13,19 +14,27 @@ struct OpenAuriBudsIntent: AppIntent {
 }
 
 struct Provider: TimelineProvider {
+    private static let logger = Logger(subsystem: "top.aurysian.auribuds", category: "WidgetTimeline")
+
     func placeholder(in context: Context) -> HeadphoneEntry {
-        HeadphoneEntry(date: Date(), data: WidgetHeadphoneData.load())
+        Self.logger.debug("[PLACEHOLDER] called, family=\(String(describing: context.family))")
+        let entry = HeadphoneEntry(date: Date(), data: WidgetHeadphoneData.load())
+        return entry
     }
 
     func getSnapshot(in context: Context, completion: @escaping (HeadphoneEntry) -> Void) {
+        Self.logger.debug("[SNAPSHOT] called, family=\(String(describing: context.family))")
         let entry = HeadphoneEntry(date: Date(), data: WidgetHeadphoneData.load())
         completion(entry)
     }
 
     func getTimeline(in context: Context, completion: @escaping (Timeline<HeadphoneEntry>) -> Void) {
+        Self.logger.debug("[TIMELINE] called, family=\(String(describing: context.family))")
         let data = WidgetHeadphoneData.load()
+        Self.logger.debug("[TIMELINE] data: name=\(data.deviceName) status=\(data.connectionStatus) L=\(data.batteryLeft) R=\(data.batteryRight) C=\(data.batteryCase)")
         let entry = HeadphoneEntry(date: Date(), data: data)
         let timeline = Timeline(entries: [entry], policy: .after(Date.now.addingTimeInterval(120)))
+        Self.logger.debug("[TIMELINE] returning entry, nextRefresh=+120s")
         completion(timeline)
     }
 }

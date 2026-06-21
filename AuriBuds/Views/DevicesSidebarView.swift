@@ -87,6 +87,17 @@ struct DevicesSidebarView: View {
                 }
                 .listRowInsets(EdgeInsets(top: 2, leading: -8, bottom: 4, trailing: -8))
                 .listRowBackground(Color.clear)
+                
+                
+                Button {
+                    viewModel.writeWidgetDebugData()
+                } label: {
+                    Label("Widget 调试写入", systemImage: "ladybug")
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .buttonStyle(.plain)
+                .listRowInsets(EdgeInsets(top: 2, leading: 8, bottom: 4, trailing: 8))
+                .listRowBackground(Color.clear)
             } header: {
                 Rectangle()
 #if os(macOS)
