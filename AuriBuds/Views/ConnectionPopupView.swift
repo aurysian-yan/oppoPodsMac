@@ -53,55 +53,41 @@ struct ConnectionPopupView: View {
     }
 
     var body: some View {
-        ZStack {
-            VStack(alignment: .center, spacing: 2) {
-                Text(state.deviceName)
-                    .font(.system(size: 14, weight: .semibold))
-                    .lineLimit(1)
-                    .frame(maxWidth: .infinity, alignment: .center)
-                    .multilineTextAlignment(.center)
+            ZStack {
+                HStack {
+                    DeviceImageView(
+                        imageName: popupImageName,
+                        fallbackSystemName: "headphones",
+                        size: CGSize(width: 38, height: 38)
+                    )
+                    .frame(width: 46, height: 46)
+                    .shadow(color: .black.opacity(0.22), radius: 4, x: 0, y: 2)
 
-                Text(state.status.title)
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .center)
-                    .multilineTextAlignment(.center)
+                    VStack(alignment: .center, spacing: 2) {
+                        Text(state.deviceName)
+                            .font(.system(size: 14, weight: .semibold))
+                            .lineLimit(1)
+                            .multilineTextAlignment(.center)
+
+                        Text(state.status.title)
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                    }
+                    .frame(maxWidth: .infinity)
+
+                    HStack { }
+                        .frame(width: 46, height: 46)
+                }
+                .padding(.horizontal, 14)
+                .frame(width: 320, height: 60)
+                .opacity(state.isPresented ? 1 : 0)
+                .scaleEffect(contentScale)
+                .offset(y: contentOffset)
+                .animation(.snappy(duration: 0.24), value: state.isPresented)
+                .animation(.snappy(duration: 0.2), value: state.isHiding)
             }
-            .padding(.horizontal, 84)
-
-            HStack {
-                DeviceImageView(
-                    imageName: popupImageName,
-                    fallbackSystemName: "headphones",
-                    size: CGSize(width: 38, height: 38)
-                )
-                .frame(width: 46, height: 46)
-
-                Spacer()
-                
-                HStack() {}
-                .frame(width: 46, height: 46)
-//                BatteryRingView(value: state.batteryLevel)
-            }
-            .padding(.horizontal, 14)
         }
-        .opacity(state.isPresented ? 1 : 0)
-        .scaleEffect(contentScale)
-        .offset(y: contentOffset)
-        .animation(.snappy(duration: 0.24), value: state.isPresented)
-        .animation(.snappy(duration: 0.2), value: state.isHiding)
-        .frame(width: 320, height: 60)
-        .background(.ultraThinMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: 42, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 42, style: .continuous)
-                .fill(.white.opacity(0.08))
-        }
-        .overlay {
-            RoundedRectangle(cornerRadius: 42, style: .continuous)
-                .stroke(.white.opacity(0.2), lineWidth: 1)
-        }
-    }
 }
 
 #Preview {

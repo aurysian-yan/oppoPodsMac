@@ -20,6 +20,7 @@ struct AuriBudsApp: App {
                 }
         }
         .defaultSize(width: 768, height: 720)
+        .restorationBehavior(.disabled)
         .commands {
             CommandMenu("设备") {
                 Button("刷新电量") {

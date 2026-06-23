@@ -8,8 +8,12 @@ final class ConnectionPopupWindowController {
     static let shared = ConnectionPopupWindowController()
 
     private let size = NSSize(width: 320, height: 60)
+    // 阴影模糊半径较大，需要足够的透明边距，否则柔和的胶囊阴影会被窗口的矩形边界裁切成直边，看起来像长方形。
+    private let shadowPadding: CGFloat = 50
+    private var panelSize: NSSize { NSSize(width: size.width + shadowPadding * 2, height: size.height + shadowPadding * 2) }
     private let state = ConnectionPopupState()
     private var panel: NSPanel?
+    private var visualEffectView: NSVisualEffectView?
     private var hostingView: NSHostingView<ConnectionPopupView>?
     private var hideWorkItem: DispatchWorkItem?
     private var animationGeneration = 0
@@ -72,10 +76,15 @@ final class ConnectionPopupWindowController {
             hostingView.frame = NSRect(origin: .zero, size: size)
             hostingView.autoresizingMask = [.width, .height]
             self.hostingView = hostingView
-            panel.contentView = hostingView
+
+            if let visualEffectView {
+                visualEffectView.addSubview(hostingView)
+            } else {
+                panel.contentView = hostingView
+            }
             debugLogOnMain("hostingView created frame=\(hostingView.frame)")
-        } else if panel.contentView == nil {
-            panel.contentView = hostingView
+        } else if let visualEffectView, let hostingView, !visualEffectView.subviews.contains(hostingView) {
+            visualEffectView.addSubview(hostingView)
             debugLogOnMain("hostingView restored to panel")
         }
 
@@ -90,8 +99,8 @@ final class ConnectionPopupWindowController {
         debugLogOnMain("screen frame=\(screen.frame), visibleFrame=\(screen.visibleFrame)")
         debugLogOnMain("panel target frame=\(panelFrame)")
 
-        panel.setContentSize(size)
-        panel.contentView?.frame = NSRect(origin: .zero, size: size)
+        panel.setContentSize(panelSize)
+        panel.contentView?.frame = NSRect(origin: .zero, size: panelSize)
         panel.setFrame(panelFrame, display: true)
 
         let shouldAnimateIn = !panel.isVisible || !state.isPresented
@@ -188,8 +197,9 @@ final class ConnectionPopupWindowController {
     }
 
     private func makePanel() -> NSPanel {
+        let panelSize = self.panelSize
         let panel = ConnectionPopupPanel(
-            contentRect: NSRect(origin: .zero, size: size),
+            contentRect: NSRect(origin: .zero, size: panelSize),
             styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
             defer: false
@@ -202,16 +212,46 @@ final class ConnectionPopupWindowController {
         panel.isReleasedWhenClosed = false
         panel.ignoresMouseEvents = true
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient, .ignoresCycle]
+
+        let shadowView = NSView(frame: NSRect(origin: .zero, size: panelSize))
+        shadowView.wantsLayer = true
+        shadowView.layer?.shadowColor = NSColor.black.cgColor
+        shadowView.layer?.shadowOffset = CGSize(width: 0, height: -6)
+        shadowView.layer?.shadowOpacity = 0.15
+        shadowView.layer?.shadowRadius = 16
+        shadowView.layer?.shadowPath = CGPath(
+            roundedRect: NSRect(origin: CGPoint(x: shadowPadding, y: shadowPadding), size: size),
+            cornerWidth: size.height / 2,
+            cornerHeight: size.height / 2,
+            transform: nil
+        )
+
+        let visualEffectView = NSVisualEffectView(frame: NSRect(origin: CGPoint(x: shadowPadding, y: shadowPadding), size: size))
+        visualEffectView.material = .menu
+        visualEffectView.blendingMode = .behindWindow
+        visualEffectView.state = .active
+        visualEffectView.wantsLayer = true
+        visualEffectView.layer?.cornerRadius = size.height / 2
+        visualEffectView.layer?.masksToBounds = true
+        // 胶囊描边：细边框跟随圆角，强化与背景的分隔。
+        visualEffectView.layer?.borderWidth = 1
+        visualEffectView.layer?.borderColor = NSColor.separatorColor.cgColor
+        visualEffectView.autoresizingMask = []
+        shadowView.addSubview(visualEffectView)
+        self.visualEffectView = visualEffectView
+
+        panel.contentView = shadowView
         return panel
     }
 
     private func frame(on screen: NSScreen) -> NSRect {
         let visibleFrame = screen.visibleFrame
+        let panelSize = self.panelSize
         let origin = NSPoint(
-            x: visibleFrame.midX - size.width / 2,
-            y: visibleFrame.maxY - size.height - 16
+            x: visibleFrame.midX - size.width / 2 - shadowPadding,
+            y: visibleFrame.maxY - size.height - 16 - shadowPadding
         )
-        return NSRect(origin: origin, size: size)
+        return NSRect(origin: origin, size: panelSize)
     }
 
     private func screenForPopup() -> NSScreen {
