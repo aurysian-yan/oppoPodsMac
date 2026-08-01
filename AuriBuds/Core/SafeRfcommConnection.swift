@@ -143,34 +143,38 @@ final class SafeRfcommConnection: OppoTransportConnection {
         retryDelay: TimeInterval,
         onEvent: @escaping (String) -> Void
     ) throws -> SafeRfcommConnection {
-        for attempt in 1...maxAttempts {
-            onEvent("connect attempt \(attempt): channel \(channelID)")
-            let delegate = SafeRfcommDelegate()
-            delegate.onEvent = onEvent
+        // 所有 IOBluetooth 调用与 run loop 自旋都必须发生在同一条、且 run loop 持续运行的线程上，
+        // 否则 open/close 回调永远不会触发（详见 BluetoothRunLoopThread）。
+        try BluetoothRunLoopThread.shared.syncThrowing {
+            for attempt in 1...maxAttempts {
+                onEvent("connect attempt \(attempt): channel \(channelID)")
+                let delegate = SafeRfcommDelegate()
+                delegate.onEvent = onEvent
 
-            do {
-                let channel = try openChannel(
-                    device: device,
-                    channelID: channelID,
-                    delegate: delegate,
-                    openTimeout: openTimeout,
-                    closeTimeout: closeTimeout,
-                    onEvent: onEvent
-                )
-                onEvent("open complete \(SafeRfcommError.formatIOReturn(delegate.openStatus ?? kIOReturnSuccess))")
-                return SafeRfcommConnection(channel: channel, delegate: delegate, closeTimeout: closeTimeout)
-            } catch SafeRfcommError.openCompleteTimeout {
-                onEvent("open timeout")
-                delegate.resetAfterFailure()
-                Thread.sleep(forTimeInterval: retryDelay)
-            } catch {
-                onEvent("error \(error.localizedDescription)")
-                delegate.resetAfterFailure()
-                Thread.sleep(forTimeInterval: retryDelay)
+                do {
+                    let channel = try openChannel(
+                        device: device,
+                        channelID: channelID,
+                        delegate: delegate,
+                        openTimeout: openTimeout,
+                        closeTimeout: closeTimeout,
+                        onEvent: onEvent
+                    )
+                    onEvent("open complete \(SafeRfcommError.formatIOReturn(delegate.openStatus ?? kIOReturnSuccess))")
+                    return SafeRfcommConnection(channel: channel, delegate: delegate, closeTimeout: closeTimeout)
+                } catch SafeRfcommError.openCompleteTimeout {
+                    onEvent("open timeout")
+                    delegate.resetAfterFailure()
+                    Thread.sleep(forTimeInterval: retryDelay)
+                } catch {
+                    onEvent("error \(error.localizedDescription)")
+                    delegate.resetAfterFailure()
+                    Thread.sleep(forTimeInterval: retryDelay)
+                }
             }
-        }
 
-        throw SafeRfcommError.openCompleteTimeout
+            throw SafeRfcommError.openCompleteTimeout
+        }
     }
 
     func write(_ command: OppoCommand) throws {
@@ -182,16 +186,18 @@ final class SafeRfcommConnection: OppoTransportConnection {
             throw SafeRfcommError.notConnected
         }
 
-        var mutableBytes = bytes
-        let status = mutableBytes.withUnsafeMutableBytes { buffer in
-            channel.writeSync(buffer.baseAddress, length: UInt16(buffer.count))
-        }
+        try BluetoothRunLoopThread.shared.syncThrowing {
+            var mutableBytes = bytes
+            let status = mutableBytes.withUnsafeMutableBytes { buffer in
+                self.channel.writeSync(buffer.baseAddress, length: UInt16(buffer.count))
+            }
 
-        delegate.onEvent?("write complete \(SafeRfcommError.formatIOReturn(status))")
+            self.delegate.onEvent?("write complete \(SafeRfcommError.formatIOReturn(status))")
 
-        guard status == kIOReturnSuccess else {
-            state = .closed
-            throw SafeRfcommError.writeFailed(status)
+            guard status == kIOReturnSuccess else {
+                self.state = .closed
+                throw SafeRfcommError.writeFailed(status)
+            }
         }
     }
 
@@ -202,49 +208,57 @@ final class SafeRfcommConnection: OppoTransportConnection {
     ) -> [Data] {
         guard matcher != .none else { return [] }
 
-        let deadline = Date().addingTimeInterval(timeout)
-        var collected: [Data] = []
+        return BluetoothRunLoopThread.shared.sync {
+            let deadline = Date().addingTimeInterval(timeout)
+            var collected: [Data] = []
 
-        while isOpen && Date() < deadline {
-            collected = delegate.responsesSince(baseline)
-            if collected.contains(where: { matcher.matches($0) }) {
-                return collected
+            while self.isOpen && Date() < deadline {
+                collected = self.delegate.responsesSince(baseline)
+                if collected.contains(where: { matcher.matches($0) }) {
+                    return collected
+                }
+
+                RunLoop.current.run(mode: .default, before: Date(timeIntervalSinceNow: 0.02))
             }
 
-            RunLoop.current.run(mode: .default, before: Date(timeIntervalSinceNow: 0.02))
+            return self.delegate.responsesSince(baseline)
         }
-
-        return delegate.responsesSince(baseline)
     }
 
     func waitForResponses(since baseline: Int, timeout: TimeInterval) -> [Data] {
-        let deadline = Date().addingTimeInterval(timeout)
+        BluetoothRunLoopThread.shared.sync {
+            let deadline = Date().addingTimeInterval(timeout)
 
-        while isOpen && Date() < deadline {
-            RunLoop.current.run(mode: .default, before: Date(timeIntervalSinceNow: 0.05))
+            while self.isOpen && Date() < deadline {
+                RunLoop.current.run(mode: .default, before: Date(timeIntervalSinceNow: 0.05))
+            }
+
+            return self.delegate.responsesSince(baseline)
         }
-
-        return delegate.responsesSince(baseline)
     }
 
     func close() {
         guard state != .closed else { return }
         state = .closing
-        delegate.resetAfterFailure()
-        delegate.channel = channel
-        delegate.onEvent?("close request")
-        channel.close()
 
-        let deadline = Date().addingTimeInterval(closeTimeout)
-        while !delegate.didClose && Date() < deadline {
-            RunLoop.current.run(mode: .default, before: Date(timeIntervalSinceNow: 0.05))
+        BluetoothRunLoopThread.shared.sync {
+            self.delegate.resetAfterFailure()
+            self.delegate.channel = self.channel
+            self.delegate.onEvent?("close request")
+            self.channel.close()
+
+            let deadline = Date().addingTimeInterval(self.closeTimeout)
+            while !self.delegate.didClose && Date() < deadline {
+                RunLoop.current.run(mode: .default, before: Date(timeIntervalSinceNow: 0.05))
+            }
+
+            if self.delegate.didClose {
+                self.delegate.onEvent?("channel closed")
+            } else {
+                self.delegate.onEvent?("channel closed timeout")
+            }
         }
 
-        if delegate.didClose {
-            delegate.onEvent?("channel closed")
-        } else {
-            delegate.onEvent?("channel closed timeout")
-        }
         state = .closed
     }
 

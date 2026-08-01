@@ -22,10 +22,10 @@ final class BluetoothClassicTransport {
     private var cachedDeviceIdentifier: String?
 
     init(
-        openTimeout: TimeInterval = 8,
-        closeTimeout: TimeInterval = 3,
-        retryDelay: TimeInterval = 2,
-        maxAttempts: Int = 3
+        openTimeout: TimeInterval = 5,
+        closeTimeout: TimeInterval = 1.5,
+        retryDelay: TimeInterval = 0.5,
+        maxAttempts: Int = 2
     ) {
         self.openTimeout = openTimeout
         self.closeTimeout = closeTimeout

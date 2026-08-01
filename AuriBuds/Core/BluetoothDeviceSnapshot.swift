@@ -16,6 +16,23 @@ struct BluetoothDeviceSnapshot: Equatable, Identifiable {
         return name
     }
 
+    /// 该地址是否为 CoreBluetooth 的外设 UUID（BLE），而非经典蓝牙的 MAC 地址。
+    var isBLEIdentifier: Bool {
+        UUID(uuidString: address) != nil
+    }
+
+    /// 返回一个仅修改连接状态的副本，便于在合并 BLE / 经典快照时统一连接态。
+    func withConnected(_ connected: Bool) -> BluetoothDeviceSnapshot {
+        BluetoothDeviceSnapshot(
+            name: name,
+            address: address,
+            isConnected: connected,
+            timestamp: timestamp,
+            majorDeviceClass: majorDeviceClass,
+            minorDeviceClass: minorDeviceClass
+        )
+    }
+
     var fallbackSystemName: String {
         switch majorDeviceClass {
         case 1:

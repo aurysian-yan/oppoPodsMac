@@ -117,47 +117,57 @@ final class BluetoothMonitor: NSObject, ObservableObject {
 #endif
 
     private func publishAvailableDevices() {
-        var merged = classicSnapshots
     #if os(macOS)
-        for (_, bleSnapshot) in bleSnapshots {
-            let bleName = OppoDeviceProfile.normalized(bleSnapshot.name)
+        var result: [String: BluetoothDeviceSnapshot] = [:]
 
-            let matchingClassicKeys = merged.keys.filter { key in
-                guard let classic = merged[key] else { return false }
-                return OppoDeviceProfile.normalized(classic.name) == bleName
+        // 1) 经典蓝牙（已配对）设备作为基准条目，键为其 MAC 地址。
+        for snapshot in classicSnapshots.values {
+            result[snapshot.id] = snapshot
+        }
+
+        // 2) 合并 BLE 设备：同名设备只保留一个，并保留“对应控制传输层所需的地址”——
+        //    OPPO 走经典 RFCOMM，需要 MAC；小米走 BLE，需要外设 UUID。
+        //    这样既消除了 BLE/经典 同设备被拆成两个的问题，又不会让所选传输层拿错地址。
+        for ble in bleSnapshots.values.sorted(by: { $0.timestamp > $1.timestamp }) {
+            let bleName = OppoDeviceProfile.normalized(ble.name)
+
+            // 2a) 命中同名的经典条目 → 合并成单一条目。
+            if let classicEntry = result.first(where: { _, snapshot in
+                !snapshot.isBLEIdentifier && OppoDeviceProfile.normalized(snapshot.name) == bleName
+            }) {
+                let connected = ble.isConnected || classicEntry.value.isConnected
+                if XiaomiDeviceProfile.isLikelyXiaomiAudioDevice(ble.name) {
+                    // 小米：用 BLE(UUID) 控制 → 用 BLE 快照替换经典条目。
+                    result.removeValue(forKey: classicEntry.key)
+                    result[ble.id] = ble.withConnected(connected)
+                } else {
+                    // OPPO 等：用经典 RFCOMM(MAC) 控制 → 保留经典条目，丢弃 BLE 重复项。
+                    result[classicEntry.key] = classicEntry.value.withConnected(connected)
+                }
+                continue
             }
 
-            let sameNameBLECount = bleSnapshots.values.filter {
-                OppoDeviceProfile.normalized($0.name) == bleName
-            }.count
-
-            let shouldMerge: Bool
-            if matchingClassicKeys.count == 1 && sameNameBLECount == 1 {
-                let classic = merged[matchingClassicKeys[0]]!
-                let statesComplementary = classic.isConnected != bleSnapshot.isConnected
-                let statesConsistent = classic.isConnected == bleSnapshot.isConnected
-                let timeClose = abs(classic.timestamp.timeIntervalSince(bleSnapshot.timestamp)) < 5.0
-                shouldMerge = (statesComplementary || statesConsistent) && timeClose
-            } else {
-                shouldMerge = false
-            }
-
-            if shouldMerge {
-                if bleSnapshot.isConnected && !merged[matchingClassicKeys[0]]!.isConnected {
-                    merged[matchingClassicKeys[0]] = bleSnapshot
+            // 2b) 没有同名经典条目：与已有 BLE 条目按名字去重，优先保留已连接的。
+            if let dup = result.first(where: { _, snapshot in
+                snapshot.isBLEIdentifier && OppoDeviceProfile.normalized(snapshot.name) == bleName
+            }) {
+                if ble.isConnected && !dup.value.isConnected {
+                    result.removeValue(forKey: dup.key)
+                    result[ble.id] = ble
                 }
             } else {
-                merged[bleSnapshot.id] = bleSnapshot
+                result[ble.id] = ble
             }
         }
-    #else
-        merged = bleSnapshots
-    #endif
 
-        availableDevices = Array(merged.values)
-            .sorted { first, second in
-                first.name.localizedStandardCompare(second.name) == .orderedAscending
-            }
+        availableDevices = result.values.sorted { first, second in
+            first.name.localizedStandardCompare(second.name) == .orderedAscending
+        }
+    #else
+        availableDevices = bleSnapshots.values.sorted { first, second in
+            first.name.localizedStandardCompare(second.name) == .orderedAscending
+        }
+    #endif
     }
         
         private func publish(
