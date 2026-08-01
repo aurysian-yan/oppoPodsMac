@@ -25,6 +25,7 @@ protocol HeadphoneManaging: AnyObject {
     func isBatteryDecodeFailure(_ error: Error) -> Bool
     func isHandshakeFailure(_ error: Error) -> Bool
     func isDeviceNotFound(_ error: Error) -> Bool
+    func isCommandTimeout(_ error: Error) -> Bool
 }
 
 protocol HeadphoneAdapter {
@@ -125,6 +126,14 @@ extension XiaomiProtocol: HeadphoneManaging {
 
         return reason.contains("No BLE device matched") || reason.contains("未发现设备")
     }
+
+    func isCommandTimeout(_ error: Error) -> Bool {
+        guard let error = error as? XiaomiProtocolError else { return false }
+        if case .commandTimeout = error {
+            return true
+        }
+        return false
+    }
 }
 
 extension OppoProtocol: HeadphoneManaging {
@@ -138,6 +147,14 @@ extension OppoProtocol: HeadphoneManaging {
 
     func isDeviceNotFound(_ error: Error) -> Bool {
         isBluetoothLEDeviceNotFound(error)
+    }
+
+    func isCommandTimeout(_ error: Error) -> Bool {
+        guard let error = error as? OppoProtocolError else { return false }
+        if case .commandTimeout = error {
+            return true
+        }
+        return false
     }
 }
 

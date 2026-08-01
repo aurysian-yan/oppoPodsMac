@@ -322,6 +322,10 @@ actor XiaomiProtocolBackend {
                     throw XiaomiProtocolError.commandRejected(command.name, rejectedStatus)
                 }
 
+                guard connection.isOpen else {
+                    throw XiaomiProtocolError.notConnected
+                }
+
                 throw XiaomiProtocolError.commandTimeout(command.name)
             } catch {
                 guard attempt < command.retryCount else {
@@ -345,13 +349,24 @@ actor XiaomiProtocolBackend {
 
         while connection.isOpen && Date() < deadline {
             collected = connection.waitForResponses(since: baseline, timeout: 0.05)
-            if collected.contains(where: { matcher.matches($0) }) {
-                return collected
+            let merged = mergeResponses(collected)
+            if merged.contains(where: { matcher.matches($0) }) {
+                return merged
             }
             RunLoop.current.run(mode: .default, before: Date(timeIntervalSinceNow: 0.02))
         }
 
-        return connection.waitForResponses(since: baseline, timeout: 0)
+        return mergeResponses(connection.waitForResponses(since: baseline, timeout: 0))
+    }
+
+    private func mergeResponses(_ responses: [Data]) -> [Data] {
+        guard !responses.isEmpty else { return [] }
+
+        var merged = Data()
+        for response in responses {
+            merged.append(response)
+        }
+        return [merged]
     }
 
     private func nextSequence() -> UInt8 {

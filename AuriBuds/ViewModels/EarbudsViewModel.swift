@@ -280,6 +280,9 @@ final class EarbudsViewModel: ObservableObject {
             state.connectionStatus = .handshakeFailed
             state.lastError = error.localizedDescription
             appendDebugEvent("error \(error.localizedDescription)")
+        } catch where client.isCommandTimeout(error) {
+            state.lastError = error.localizedDescription
+            appendDebugEvent("error \(error.localizedDescription)")
         } catch {
             state.appConnected = false
             state.connectionStatus = connectionFailureStatus(for: error, client: client)

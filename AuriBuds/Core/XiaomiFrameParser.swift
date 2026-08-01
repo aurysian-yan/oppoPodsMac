@@ -2,12 +2,14 @@ import Foundation
 
 enum XiaomiFrameParser {
     static func decodeBattery(from data: Data) -> BatteryState? {
-        guard let packet = XiaomiRCSPFrame.decode(data), packet.opcode == XiaomiRCSPCommand.getTargetInfo else {
-            return decodeBatteryFromLoosePayload(Array(data))
+        for packet in XiaomiRCSPFrame.decodeAll(data) where packet.opcode == XiaomiRCSPCommand.getTargetInfo {
+            if let battery = decodeBatteryFromTargetInfoPayload(packet.parameter)
+                ?? decodeBatteryFromLoosePayload(packet.parameter) {
+                return battery
+            }
         }
 
-        return decodeBatteryFromTargetInfoPayload(packet.parameter)
-            ?? decodeBatteryFromLoosePayload(packet.parameter)
+        return decodeBatteryFromLoosePayload(Array(data))
     }
 
     static func isBatteryResponse(_ data: Data) -> Bool {
@@ -15,13 +17,15 @@ enum XiaomiFrameParser {
     }
 
     static func decodeANCMode(from data: Data) -> ANCMode? {
-        if let packet = XiaomiRCSPFrame.decode(data) {
+        for packet in XiaomiRCSPFrame.decodeAll(data) {
             if packet.opcode == XiaomiRCSPCommand.getDeviceConfig,
                let mode = decodeANCMode(fromDeviceConfigPayload: packet.parameter) {
                 return mode
             }
 
-            return decodeANCMode(fromVendorPayload: packet.parameter)
+            if let mode = decodeANCMode(fromVendorPayload: packet.parameter) {
+                return mode
+            }
         }
 
         let bytes = Array(data)

@@ -41,7 +41,7 @@ struct XiaomiCommand {
 enum XiaomiResponseMatcher: Equatable {
     case none
     case opcode(UInt8)
-    case opcodeStatus(UInt8, UInt8)
+    case opcodeStatus(UInt8, UInt8, sequence: UInt8)
     case battery
     case anc
 
@@ -50,10 +50,14 @@ enum XiaomiResponseMatcher: Equatable {
         case .none:
             return true
         case .opcode(let opcode):
-            return XiaomiRCSPFrame.decode(data)?.opcode == opcode
-        case .opcodeStatus(let opcode, let status):
-            let packet = XiaomiRCSPFrame.decode(data)
-            return packet?.opcode == opcode && packet?.status == status
+            return XiaomiRCSPFrame.decodeAll(data).contains { $0.opcode == opcode }
+        case .opcodeStatus(let opcode, let status, let sequence):
+            return XiaomiRCSPFrame.decodeAll(data).contains {
+                !$0.isCommand
+                    && $0.opcode == opcode
+                    && $0.status == status
+                    && $0.sequence == sequence
+            }
         case .battery:
             return XiaomiFrameParser.decodeBattery(from: data) != nil
         case .anc:
@@ -63,20 +67,22 @@ enum XiaomiResponseMatcher: Equatable {
     }
 
     func rejectedStatus(in data: Data) -> UInt8? {
-        guard case .opcodeStatus(let opcode, let expectedStatus) = self,
-              let packet = XiaomiRCSPFrame.decode(data),
-              packet.opcode == opcode,
-              let status = packet.status,
-              status != expectedStatus else {
+        guard case .opcodeStatus(let opcode, let expectedStatus, let sequence) = self else {
             return nil
         }
 
-        return status
+        return XiaomiRCSPFrame.decodeAll(data).first {
+            !$0.isCommand
+                && $0.opcode == opcode
+                && $0.sequence == sequence
+                && $0.status != expectedStatus
+        }?.status
     }
 
     private func matchesSuccessfulOpcode(_ data: Data, _ opcode: UInt8) -> Bool {
-        let packet = XiaomiRCSPFrame.decode(data)
-        return packet?.opcode == opcode && (packet?.status ?? 0) == 0
+        XiaomiRCSPFrame.decodeAll(data).contains {
+            !$0.isCommand && $0.opcode == opcode && ($0.status ?? 0) == 0
+        }
     }
 }
 
@@ -100,13 +106,21 @@ enum XiaomiRCSPFrame {
     }
 
     static func decode(_ data: Data) -> XiaomiRCSPPacket? {
-        let bytes = Array(data)
-        guard bytes.count >= 9 else { return nil }
+        decodeAll(data).first
+    }
 
-        for startIndex in 0...(bytes.count - 8) {
+    static func decodeAll(_ data: Data) -> [XiaomiRCSPPacket] {
+        let bytes = Array(data)
+        guard bytes.count >= 9 else { return [] }
+
+        var packets: [XiaomiRCSPPacket] = []
+        var startIndex = 0
+
+        while startIndex <= bytes.count - 9 {
             guard bytes[startIndex] == XiaomiRCSPConstants.framePrefix[0],
                   bytes[startIndex + 1] == XiaomiRCSPConstants.framePrefix[1],
                   bytes[startIndex + 2] == XiaomiRCSPConstants.framePrefix[2] else {
+                startIndex += 1
                 continue
             }
 
@@ -115,8 +129,12 @@ enum XiaomiRCSPFrame {
             let opcode = bytes[bodyStart + 1]
             let parameterLength = (Int(bytes[bodyStart + 2]) << 8) | Int(bytes[bodyStart + 3])
             let frameEnd = bodyStart + 4 + parameterLength
-            guard frameEnd < bytes.count, bytes[frameEnd] == XiaomiRCSPConstants.frameSuffix else { continue }
-            guard parameterLength > 0 else { continue }
+            guard parameterLength > 0,
+                  frameEnd < bytes.count,
+                  bytes[frameEnd] == XiaomiRCSPConstants.frameSuffix else {
+                startIndex += 1
+                continue
+            }
 
             let isCommand = (flag & 0x80) != 0
             let hasResponse = (flag & 0x40) != 0
@@ -127,7 +145,7 @@ enum XiaomiRCSPFrame {
             let payload = payloadStart <= frameEnd - 1 ? Array(bytes[payloadStart..<frameEnd]) : []
 
             if isCommand {
-                return XiaomiRCSPPacket(
+                packets.append(XiaomiRCSPPacket(
                     opcode: opcode,
                     sequence: firstPayloadByte,
                     status: nil,
@@ -135,31 +153,33 @@ enum XiaomiRCSPFrame {
                     isCommand: true,
                     hasResponse: hasResponse,
                     parameter: payload
-                )
-            }
-
-            let sequence: UInt8
-            let status: UInt8
-            if opcode == 0x01 {
-                status = firstPayloadByte
-                sequence = 0
+                ))
             } else {
-                status = firstPayloadByte
-                sequence = payload.first ?? 0
+                let sequence: UInt8
+                let status: UInt8
+                if opcode == 0x01 {
+                    status = firstPayloadByte
+                    sequence = 0
+                } else {
+                    status = firstPayloadByte
+                    sequence = payload.first ?? 0
+                }
+
+                packets.append(XiaomiRCSPPacket(
+                    opcode: opcode,
+                    sequence: sequence,
+                    status: status,
+                    targetApp: targetApp,
+                    isCommand: false,
+                    hasResponse: hasResponse,
+                    parameter: payload.dropFirstIfNeeded()
+                ))
             }
 
-            return XiaomiRCSPPacket(
-                opcode: opcode,
-                sequence: sequence,
-                status: status,
-                targetApp: targetApp,
-                isCommand: false,
-                hasResponse: hasResponse,
-                parameter: payload.dropFirstIfNeeded()
-            )
+            startIndex = frameEnd + 1
         }
 
-        return nil
+        return packets
     }
 }
 
@@ -210,7 +230,7 @@ enum XiaomiCommands {
                 sequence: sequence,
                 parameter: vendorData(type: 0x04, data: [ancValue(for: mode)])
             ),
-            expectedResponse: .opcodeStatus(XiaomiRCSPCommand.setTargetInfo, 0x00),
+            expectedResponse: .opcodeStatus(XiaomiRCSPCommand.setTargetInfo, 0x00, sequence: sequence),
             timeout: 2,
             retryCount: 1
         )
