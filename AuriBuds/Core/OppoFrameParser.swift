@@ -108,21 +108,48 @@ enum OppoFrameParser {
         return ancMode(from: payload[2])
     }
 
-    private static func parseBatteryFields(in bytes: [UInt8], after startIndex: Int) -> (left: UInt8, right: UInt8, batteryCase: UInt8)? {
-        guard startIndex <= bytes.count - 7 else { return nil }
+    private static func parseBatteryFields(in bytes: [UInt8], after startIndex: Int) -> (left: UInt8?, right: UInt8?, batteryCase: UInt8?)? {
+        guard startIndex < bytes.count else { return nil }
 
-        for index in startIndex...(bytes.count - 7) where bytes[index] == 0x03 {
-            guard bytes[index + 1] == 0x01,
-                  bytes[index + 3] == 0x02,
-                  bytes[index + 5] == 0x03 else {
-                continue
+        for index in startIndex..<bytes.count {
+            let fieldCount = Int(bytes[index])
+            guard (1...3).contains(fieldCount) else { continue }
+
+            let fieldsStart = index + 1
+            let fieldsEnd = fieldsStart + fieldCount * 2
+            guard fieldsEnd <= bytes.count else { continue }
+
+            var left: UInt8?
+            var right: UInt8?
+            var batteryCase: UInt8?
+            var seenComponents = Set<UInt8>()
+            var isValid = true
+
+            for fieldIndex in stride(from: fieldsStart, to: fieldsEnd, by: 2) {
+                let component = bytes[fieldIndex]
+                let value = bytes[fieldIndex + 1]
+                guard seenComponents.insert(component).inserted else {
+                    isValid = false
+                    break
+                }
+
+                switch component {
+                case 0x01:
+                    left = value
+                case 0x02:
+                    right = value
+                case 0x03:
+                    batteryCase = value
+                default:
+                    isValid = false
+                }
+
+                guard isValid else { break }
             }
 
-            return (
-                left: bytes[index + 2],
-                right: bytes[index + 4],
-                batteryCase: bytes[index + 6]
-            )
+            if isValid {
+                return (left: left, right: right, batteryCase: batteryCase)
+            }
         }
 
         return nil
